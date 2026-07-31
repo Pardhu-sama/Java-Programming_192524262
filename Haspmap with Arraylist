@@ -1,0 +1,33 @@
+import java.util.*;
+
+public class Main {
+    public static void main(String[] args) {
+        Scanner sc = new Scanner(System.in);
+
+        System.out.print("Enter number of words: ");
+        int n = sc.nextInt();
+
+        HashMap<Character, ArrayList<String>> map = new HashMap<>();
+
+        System.out.println("Enter the words:");
+
+        for (int i = 0; i < n; i++) {
+            String word = sc.next();
+            char firstLetter = Character.toUpperCase(word.charAt(0));
+
+            if (!map.containsKey(firstLetter)) {
+                map.put(firstLetter, new ArrayList<String>());
+            }
+
+            map.get(firstLetter).add(word);
+        }
+
+        System.out.println("\nWords Grouped by First Letter:");
+
+        for (Character key : map.keySet()) {
+            System.out.println(key + " : " + map.get(key));
+        }
+
+        sc.close();
+    }
+}
