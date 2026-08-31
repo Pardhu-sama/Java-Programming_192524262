@@ -1,0 +1,675 @@
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.util.Scanner;
+
+public class Main {
+
+    // Database connection details
+    static final String URL =
+            "jdbc:mysql://localhost:3306/courier_db";
+
+    static final String USERNAME = "courierapp";
+
+    static Connection con;
+
+    public static void main(String[] args) {
+
+        Scanner sc = new Scanner(System.in);
+
+        try {
+
+            // Ask for password at runtime
+            System.out.print("Enter database password: ");
+            String password = sc.nextLine();
+
+            // Connect to MySQL
+            con = DriverManager.getConnection(
+                    URL,
+                    USERNAME,
+                    password
+            );
+
+            System.out.println(
+                    "\nDatabase connected successfully!");
+
+            int choice;
+
+            // Display menu until user chooses Exit
+            do {
+
+                System.out.println("\n=================================");
+                System.out.println("   COURIER DELIVERY SYSTEM");
+                System.out.println("=================================");
+                System.out.println("1. Assign Delivery");
+                System.out.println("2. Update Delivery Status");
+                System.out.println("3. Reassign Package");
+                System.out.println("4. Agent Workload Report");
+                System.out.println("5. Search Delivery");
+                System.out.println("6. Exit");
+                System.out.println("=================================");
+
+                System.out.print("Enter your choice: ");
+
+                try {
+
+                    choice = Integer.parseInt(sc.nextLine());
+
+                } catch (NumberFormatException e) {
+
+                    System.out.println(
+                            "Please enter a valid number.");
+
+                    choice = 0;
+                }
+
+                switch (choice) {
+
+                    case 1:
+                        assignDelivery(sc);
+                        break;
+
+                    case 2:
+                        updateStatus(sc);
+                        break;
+
+                    case 3:
+                        reassignPackage(sc);
+                        break;
+
+                    case 4:
+                        workloadReport();
+                        break;
+
+                    case 5:
+                        searchDelivery(sc);
+                        break;
+
+                    case 6:
+                        System.out.println(
+                                "\nThank you for using " +
+                                "Courier Delivery System!");
+                        break;
+
+                    default:
+                        System.out.println(
+                                "\nInvalid choice. Please try again.");
+                }
+
+            } while (choice != 6);
+
+            // Close database connection
+            con.close();
+
+        } catch (Exception e) {
+
+            System.out.println(
+                    "\nDatabase connection failed!");
+
+            System.out.println(
+                    "Error: " + e.getMessage());
+
+        } finally {
+
+            sc.close();
+        }
+    }
+
+    // =====================================================
+    // 1. ASSIGN DELIVERY
+    // =====================================================
+
+    static void assignDelivery(Scanner sc)
+            throws Exception {
+
+        System.out.println(
+                "\n========== ASSIGN DELIVERY ==========");
+
+        System.out.print("Enter Package ID: ");
+        String packageId = sc.nextLine().trim();
+
+        // Validate package ID
+        if (packageId.isEmpty()) {
+
+            System.out.println(
+                    "Package ID cannot be empty.");
+
+            return;
+        }
+
+        // Check whether package already exists
+        String checkPackage =
+                "SELECT package_id FROM deliveries " +
+                "WHERE package_id = ?";
+
+        PreparedStatement checkPs =
+                con.prepareStatement(checkPackage);
+
+        checkPs.setString(1, packageId);
+
+        ResultSet checkRs =
+                checkPs.executeQuery();
+
+        if (checkRs.next()) {
+
+            System.out.println(
+                    "Package already exists.");
+
+            checkRs.close();
+            checkPs.close();
+
+            return;
+        }
+
+        checkRs.close();
+        checkPs.close();
+
+        // Find least-loaded agent
+        String findAgent =
+                "SELECT agent_id, name, active_deliveries " +
+                "FROM delivery_agents " +
+                "ORDER BY active_deliveries ASC " +
+                "LIMIT 1";
+
+        PreparedStatement ps =
+                con.prepareStatement(findAgent);
+
+        ResultSet rs =
+                ps.executeQuery();
+
+        if (rs.next()) {
+
+            int agentId =
+                    rs.getInt("agent_id");
+
+            String agentName =
+                    rs.getString("name");
+
+            int activeDeliveries =
+                    rs.getInt("active_deliveries");
+
+            // Insert delivery
+            String insert =
+                    "INSERT INTO deliveries " +
+                    "(agent_id, package_id, status) " +
+                    "VALUES (?, ?, ?)";
+
+            PreparedStatement insertPs =
+                    con.prepareStatement(insert);
+
+            insertPs.setInt(1, agentId);
+            insertPs.setString(2, packageId);
+            insertPs.setString(3, "Assigned");
+
+            insertPs.executeUpdate();
+
+            // Increase workload
+            String update =
+                    "UPDATE delivery_agents " +
+                    "SET active_deliveries = " +
+                    "active_deliveries + 1 " +
+                    "WHERE agent_id = ?";
+
+            PreparedStatement updatePs =
+                    con.prepareStatement(update);
+
+            updatePs.setInt(1, agentId);
+
+            updatePs.executeUpdate();
+
+            System.out.println(
+                    "\nPackage assigned successfully!");
+
+            System.out.println(
+                    "Package ID: " + packageId);
+
+            System.out.println(
+                    "Assigned Agent: " + agentName);
+
+            System.out.println(
+                    "Previous Active Deliveries: "
+                    + activeDeliveries);
+
+            insertPs.close();
+            updatePs.close();
+
+        } else {
+
+            System.out.println(
+                    "No delivery agents available.");
+        }
+
+        rs.close();
+        ps.close();
+    }
+
+    // =====================================================
+    // 2. UPDATE DELIVERY STATUS
+    // =====================================================
+
+    static void updateStatus(Scanner sc)
+            throws Exception {
+
+        System.out.println(
+                "\n====== UPDATE DELIVERY STATUS ======");
+
+        System.out.print("Enter Package ID: ");
+        String packageId = sc.nextLine().trim();
+
+        if (packageId.isEmpty()) {
+
+            System.out.println(
+                    "Package ID cannot be empty.");
+
+            return;
+        }
+
+        System.out.print("Enter New Status: ");
+        String newStatus = sc.nextLine().trim();
+
+        if (newStatus.isEmpty()) {
+
+            System.out.println(
+                    "Status cannot be empty.");
+
+            return;
+        }
+
+        String sql =
+                "UPDATE deliveries " +
+                "SET status = ? " +
+                "WHERE package_id = ?";
+
+        PreparedStatement ps =
+                con.prepareStatement(sql);
+
+        ps.setString(1, newStatus);
+        ps.setString(2, packageId);
+
+        int rows =
+                ps.executeUpdate();
+
+        if (rows > 0) {
+
+            System.out.println(
+                    "\nDelivery status updated successfully!");
+
+            System.out.println(
+                    "Package ID: " + packageId);
+
+            System.out.println(
+                    "New Status: " + newStatus);
+
+        } else {
+
+            System.out.println(
+                    "\nPackage ID not found.");
+        }
+
+        ps.close();
+    }
+
+    // =====================================================
+    // 3. REASSIGN PACKAGE
+    // =====================================================
+
+    static void reassignPackage(Scanner sc)
+            throws Exception {
+
+        System.out.println(
+                "\n========== REASSIGN PACKAGE ==========");
+
+        System.out.print("Enter Package ID: ");
+        String packageId = sc.nextLine().trim();
+
+        if (packageId.isEmpty()) {
+
+            System.out.println(
+                    "Package ID cannot be empty.");
+
+            return;
+        }
+
+        // Find current agent
+        String findPackage =
+                "SELECT agent_id " +
+                "FROM deliveries " +
+                "WHERE package_id = ?";
+
+        PreparedStatement findPs =
+                con.prepareStatement(findPackage);
+
+        findPs.setString(1, packageId);
+
+        ResultSet rs =
+                findPs.executeQuery();
+
+        if (!rs.next()) {
+
+            System.out.println(
+                    "\nPackage ID not found.");
+
+            rs.close();
+            findPs.close();
+
+            return;
+        }
+
+        int oldAgentId =
+                rs.getInt("agent_id");
+
+        System.out.println(
+                "Current Agent ID: " + oldAgentId);
+
+        System.out.print(
+                "Enter New Agent ID: ");
+
+        int newAgentId;
+
+        try {
+
+            newAgentId =
+                    Integer.parseInt(sc.nextLine());
+
+        } catch (NumberFormatException e) {
+
+            System.out.println(
+                    "Invalid Agent ID.");
+
+            rs.close();
+            findPs.close();
+
+            return;
+        }
+
+        // Same agent check
+        if (oldAgentId == newAgentId) {
+
+            System.out.println(
+                    "Package is already assigned " +
+                    "to this agent.");
+
+            rs.close();
+            findPs.close();
+
+            return;
+        }
+
+        // Check whether new agent exists
+        String checkAgent =
+                "SELECT agent_id FROM delivery_agents " +
+                "WHERE agent_id = ?";
+
+        PreparedStatement checkAgentPs =
+                con.prepareStatement(checkAgent);
+
+        checkAgentPs.setInt(1, newAgentId);
+
+        ResultSet agentRs =
+                checkAgentPs.executeQuery();
+
+        if (!agentRs.next()) {
+
+            System.out.println(
+                    "New Agent ID does not exist.");
+
+            agentRs.close();
+            checkAgentPs.close();
+            rs.close();
+            findPs.close();
+
+            return;
+        }
+
+        agentRs.close();
+        checkAgentPs.close();
+
+        try {
+
+            // Start transaction
+            con.setAutoCommit(false);
+
+            // ---------------------------------------------
+            // STEP 1: Change package's assigned agent
+            // ---------------------------------------------
+
+            String updateDelivery =
+                    "UPDATE deliveries " +
+                    "SET agent_id = ? " +
+                    "WHERE package_id = ?";
+
+            PreparedStatement updatePs =
+                    con.prepareStatement(updateDelivery);
+
+            updatePs.setInt(1, newAgentId);
+            updatePs.setString(2, packageId);
+
+            int deliveryRows =
+                    updatePs.executeUpdate();
+
+            if (deliveryRows == 0) {
+
+                throw new Exception(
+                        "Package update failed.");
+            }
+
+            // ---------------------------------------------
+            // STEP 2: Decrease old agent workload
+            // ---------------------------------------------
+
+            String decrease =
+                    "UPDATE delivery_agents " +
+                    "SET active_deliveries = " +
+                    "active_deliveries - 1 " +
+                    "WHERE agent_id = ? " +
+                    "AND active_deliveries > 0";
+
+            PreparedStatement decreasePs =
+                    con.prepareStatement(decrease);
+
+            decreasePs.setInt(1, oldAgentId);
+
+            int decreaseRows =
+                    decreasePs.executeUpdate();
+
+            if (decreaseRows == 0) {
+
+                throw new Exception(
+                        "Old agent workload update failed.");
+            }
+
+            // ---------------------------------------------
+            // STEP 3: Increase new agent workload
+            // ---------------------------------------------
+
+            String increase =
+                    "UPDATE delivery_agents " +
+                    "SET active_deliveries = " +
+                    "active_deliveries + 1 " +
+                    "WHERE agent_id = ?";
+
+            PreparedStatement increasePs =
+                    con.prepareStatement(increase);
+
+            increasePs.setInt(1, newAgentId);
+
+            int increaseRows =
+                    increasePs.executeUpdate();
+
+            if (increaseRows == 0) {
+
+                throw new Exception(
+                        "New agent workload update failed.");
+            }
+
+            // ---------------------------------------------
+            // All operations successful
+            // ---------------------------------------------
+
+            con.commit();
+
+            System.out.println(
+                    "\nPackage reassigned successfully!");
+
+            System.out.println(
+                    "Package ID: " + packageId);
+
+            System.out.println(
+                    "Old Agent ID: " + oldAgentId);
+
+            System.out.println(
+                    "New Agent ID: " + newAgentId);
+
+            updatePs.close();
+            decreasePs.close();
+            increasePs.close();
+
+        } catch (Exception e) {
+
+            // Undo every operation in this transaction
+            con.rollback();
+
+            System.out.println(
+                    "\nReassignment failed.");
+
+            System.out.println(
+                    "All database changes were rolled back.");
+
+            System.out.println(
+                    "Error: " + e.getMessage());
+
+        } finally {
+
+            // Return JDBC to normal mode
+            con.setAutoCommit(true);
+        }
+
+        rs.close();
+        findPs.close();
+    }
+
+    // =====================================================
+    // 4. AGENT WORKLOAD REPORT
+    // =====================================================
+
+    static void workloadReport()
+            throws Exception {
+
+        System.out.println(
+                "\n======= AGENT WORKLOAD REPORT =======");
+
+        String sql =
+                "SELECT agent_id, name, " +
+                "active_deliveries " +
+                "FROM delivery_agents " +
+                "ORDER BY active_deliveries ASC";
+
+        PreparedStatement ps =
+                con.prepareStatement(sql);
+
+        ResultSet rs =
+                ps.executeQuery();
+
+        boolean found = false;
+
+        while (rs.next()) {
+
+            found = true;
+
+            System.out.println(
+                    "Agent ID: " +
+                    rs.getInt("agent_id"));
+
+            System.out.println(
+                    "Name: " +
+                    rs.getString("name"));
+
+            System.out.println(
+                    "Active Deliveries: " +
+                    rs.getInt("active_deliveries"));
+
+            System.out.println(
+                    "-----------------------------------");
+        }
+
+        if (!found) {
+
+            System.out.println(
+                    "No delivery agents found.");
+        }
+
+        rs.close();
+        ps.close();
+    }
+
+    // =====================================================
+    // 5. SEARCH DELIVERY
+    // =====================================================
+
+    static void searchDelivery(Scanner sc)
+            throws Exception {
+
+        System.out.println(
+                "\n========== SEARCH DELIVERY ==========");
+
+        System.out.print("Enter Package ID: ");
+        String packageId = sc.nextLine().trim();
+
+        if (packageId.isEmpty()) {
+
+            System.out.println(
+                    "Package ID cannot be empty.");
+
+            return;
+        }
+
+        String sql =
+                "SELECT d.package_id, " +
+                "d.agent_id, " +
+                "a.name, " +
+                "d.status " +
+                "FROM deliveries d " +
+                "JOIN delivery_agents a " +
+                "ON d.agent_id = a.agent_id " +
+                "WHERE d.package_id = ?";
+
+        PreparedStatement ps =
+                con.prepareStatement(sql);
+
+        ps.setString(1, packageId);
+
+        ResultSet rs =
+                ps.executeQuery();
+
+        if (rs.next()) {
+
+            System.out.println(
+                    "\n======= DELIVERY DETAILS =======");
+
+            System.out.println(
+                    "Package ID: " +
+                    rs.getString("package_id"));
+
+            System.out.println(
+                    "Agent ID: " +
+                    rs.getInt("agent_id"));
+
+            System.out.println(
+                    "Agent Name: " +
+                    rs.getString("name"));
+
+            System.out.println(
+                    "Status: " +
+                    rs.getString("status"));
+
+        } else {
+
+            System.out.println(
+                    "\nPackage ID not found.");
+        }
+
+        rs.close();
+        ps.close();
+    }
+}
