@@ -1,0 +1,262 @@
+import java.sql.*;
+import java.time.Duration;
+import java.time.LocalDateTime;
+import java.util.Scanner;
+
+public class SmartParkingSystem {
+
+    private static final String URL =
+            "jdbc:mysql://localhost:3306/smart_parking";
+    private static final String USER = "root";
+    private static final String PASSWORD = "your_password";
+
+    private static Connection getConnection() throws SQLException {
+        return DriverManager.getConnection(URL, USER, PASSWORD);
+    }
+
+    private static final double HOURLY_RATE = 30.0;
+
+    public static void vehicleEntry(String vehicleNo) {
+        String findSlot =
+                "SELECT slot_no FROM parking_slots " +
+                "WHERE is_occupied = FALSE ORDER BY slot_no LIMIT 1";
+
+        String occupySlot =
+                "UPDATE parking_slots SET is_occupied = TRUE " +
+                "WHERE slot_no = ?";
+
+        String insertLog =
+                "INSERT INTO parking_log " +
+                "(slot_no, vehicle_no, entry_time) VALUES (?, ?, ?)";
+
+        try (Connection con = getConnection();
+             PreparedStatement psFind = con.prepareStatement(findSlot);
+             ResultSet rs = psFind.executeQuery()) {
+
+            if (!rs.next()) {
+                System.out.println("No parking slot available.");
+                return;
+            }
+
+            int slotNo = rs.getInt("slot_no");
+
+            try (PreparedStatement psUpdate =
+                         con.prepareStatement(occupySlot);
+                 PreparedStatement psInsert =
+                         con.prepareStatement(insertLog)) {
+
+                psUpdate.setInt(1, slotNo);
+                psUpdate.executeUpdate();
+
+                psInsert.setInt(1, slotNo);
+                psInsert.setString(2, vehicleNo);
+                psInsert.setTimestamp(
+                        3, Timestamp.valueOf(LocalDateTime.now()));
+                psInsert.executeUpdate();
+
+                System.out.println(
+                        "Vehicle " + vehicleNo +
+                        " allocated to slot " + slotNo);
+            }
+
+        } catch (SQLException e) {
+            System.out.println("Entry error: " + e.getMessage());
+        }
+    }
+
+    public static void vehicleExit(String vehicleNo) {
+        String findLog =
+                "SELECT log_id, slot_no, entry_time " +
+                "FROM parking_log " +
+                "WHERE vehicle_no = ? AND exit_time IS NULL " +
+                "ORDER BY entry_time DESC LIMIT 1";
+
+        String updateLog =
+                "UPDATE parking_log SET exit_time = ?, fee = ? " +
+                "WHERE log_id = ?";
+
+        String freeSlot =
+                "UPDATE parking_slots SET is_occupied = FALSE " +
+                "WHERE slot_no = ?";
+
+        try (Connection con = getConnection();
+             PreparedStatement psFind = con.prepareStatement(findLog)) {
+
+            psFind.setString(1, vehicleNo);
+
+            try (ResultSet rs = psFind.executeQuery()) {
+                if (!rs.next()) {
+                    System.out.println(
+                            "No active parking record found.");
+                    return;
+                }
+
+                int logId = rs.getInt("log_id");
+                int slotNo = rs.getInt("slot_no");
+                LocalDateTime entryTime =
+                        rs.getTimestamp("entry_time").toLocalDateTime();
+                LocalDateTime exitTime = LocalDateTime.now();
+
+                long minutes =
+                        Math.max(1, Duration.between(
+                                entryTime, exitTime).toMinutes());
+
+                long hours = (minutes + 59) / 60;
+                double fee = hours * HOURLY_RATE;
+
+                try (PreparedStatement psUpdate =
+                             con.prepareStatement(updateLog);
+                     PreparedStatement psFree =
+                             con.prepareStatement(freeSlot)) {
+
+                    psUpdate.setTimestamp(
+                            1, Timestamp.valueOf(exitTime));
+                    psUpdate.setDouble(2, fee);
+                    psUpdate.setInt(3, logId);
+                    psUpdate.executeUpdate();
+
+                    psFree.setInt(1, slotNo);
+                    psFree.executeUpdate();
+
+                    System.out.printf(
+                            "Vehicle %s exited from slot %d. Fee: Rs. %.2f%n",
+                            vehicleNo, slotNo, fee);
+                }
+            }
+
+        } catch (SQLException e) {
+            System.out.println("Exit error: " + e.getMessage());
+        }
+    }
+
+    public static void searchVehicle(String vehicleNo) {
+        String sql =
+                "SELECT log_id, slot_no, entry_time, exit_time, fee " +
+                "FROM parking_log WHERE vehicle_no = ? " +
+                "ORDER BY entry_time DESC";
+
+        try (Connection con = getConnection();
+             PreparedStatement ps = con.prepareStatement(sql)) {
+
+            ps.setString(1, vehicleNo);
+
+            try (ResultSet rs = ps.executeQuery()) {
+                boolean found = false;
+
+                while (rs.next()) {
+                    found = true;
+                    System.out.println(
+                            "Log ID: " + rs.getInt("log_id") +
+                            ", Slot: " + rs.getInt("slot_no") +
+                            ", Entry: " + rs.getTimestamp("entry_time") +
+                            ", Exit: " + rs.getTimestamp("exit_time") +
+                            ", Fee: Rs. " + rs.getDouble("fee"));
+                }
+
+                if (!found) {
+                    System.out.println(
+                            "No parking history found.");
+                }
+            }
+
+        } catch (SQLException e) {
+            System.out.println("Search error: " + e.getMessage());
+        }
+    }
+
+    public static void displayOccupiedSlots() {
+        String sql =
+                "SELECT slot_no FROM parking_slots " +
+                "WHERE is_occupied = TRUE ORDER BY slot_no";
+
+        try (Connection con = getConnection();
+             PreparedStatement ps = con.prepareStatement(sql);
+             ResultSet rs = ps.executeQuery()) {
+
+            System.out.println("Occupied Slots:");
+            boolean found = false;
+
+            while (rs.next()) {
+                found = true;
+                System.out.println(
+                        "Slot " + rs.getInt("slot_no"));
+            }
+
+            if (!found) {
+                System.out.println("No slots are currently occupied.");
+            }
+
+        } catch (SQLException e) {
+            System.out.println(
+                    "Occupied-slot report error: " + e.getMessage());
+        }
+    }
+
+    public static void dailyRevenue() {
+        String sql =
+                "SELECT COALESCE(SUM(fee), 0) AS total_revenue " +
+                "FROM parking_log " +
+                "WHERE exit_time IS NOT NULL " +
+                "AND DATE(exit_time) = CURDATE()";
+
+        try (Connection con = getConnection();
+             PreparedStatement ps = con.prepareStatement(sql);
+             ResultSet rs = ps.executeQuery()) {
+
+            if (rs.next()) {
+                System.out.printf(
+                        "Today's Revenue: Rs. %.2f%n",
+                        rs.getDouble("total_revenue"));
+            }
+
+        } catch (SQLException e) {
+            System.out.println(
+                    "Revenue report error: " + e.getMessage());
+        }
+    }
+
+    public static void main(String[] args) {
+        Scanner sc = new Scanner(System.in);
+
+        while (true) {
+            System.out.println("\n=== SMART PARKING SYSTEM ===");
+            System.out.println("1. Vehicle Entry");
+            System.out.println("2. Vehicle Exit");
+            System.out.println("3. Search Vehicle");
+            System.out.println("4. Display Occupied Slots");
+            System.out.println("5. Daily Revenue");
+            System.out.println("6. Exit");
+
+            System.out.print("Enter choice: ");
+            int choice = sc.nextInt();
+            sc.nextLine();
+
+            switch (choice) {
+                case 1:
+                    System.out.print("Enter vehicle number: ");
+                    vehicleEntry(sc.nextLine());
+                    break;
+                case 2:
+                    System.out.print("Enter vehicle number: ");
+                    vehicleExit(sc.nextLine());
+                    break;
+                case 3:
+                    System.out.print("Enter vehicle number: ");
+                    searchVehicle(sc.nextLine());
+                    break;
+                case 4:
+                    displayOccupiedSlots();
+                    break;
+                case 5:
+                    dailyRevenue();
+                    break;
+                case 6:
+                    System.out.println("Thank you.");
+                    sc.close();
+                    return;
+                default:
+                    System.out.println("Invalid choice.");
+            }
+        }
+    }
+}
